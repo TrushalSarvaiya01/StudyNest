@@ -13,12 +13,17 @@ function DepartmentPage() {
   useEffect(() => {
     const controller = new AbortController();
 
+    // /departments/:id now returns the department with its semesters
+    // embedded, so a single request replaces the previous two
+    // (GET /departments/:id + GET /departments/:id/semesters).
     api
       .get(`/departments/${id}`, {
         signal: controller.signal,
       })
       .then((res) => {
-        setDepartment(res.data);
+        const { semesters: embeddedSemesters, ...departmentData } = res.data;
+        setDepartment(departmentData);
+        setSemesters(embeddedSemesters || []);
       })
       .catch((error) => {
         if (isRequestCancelled(error)) {
@@ -26,21 +31,6 @@ function DepartmentPage() {
         }
 
         console.error('Failed to load department:', error);
-      });
-
-    api
-      .get(`/departments/${id}/semesters`, {
-        signal: controller.signal,
-      })
-      .then((res) => {
-        setSemesters(res.data);
-      })
-      .catch((error) => {
-        if (isRequestCancelled(error)) {
-          return;
-        }
-
-        console.error('Failed to load semesters:', error);
       });
 
     return () => {

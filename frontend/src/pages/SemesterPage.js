@@ -14,27 +14,17 @@ function SemesterPage() {
   useEffect(() => {
     const controller = new AbortController();
 
-    api
-      .get(`/semesters/${id}/subjects`, {
-        signal: controller.signal,
-      })
-      .then((res) => {
-        setSubjects(res.data);
-      })
-      .catch((error) => {
-        if (isRequestCancelled(error)) {
-          return;
-        }
-
-        console.error('Failed to load subjects:', error);
-      });
-
+    // /semesters/:id now returns the semester with its subjects embedded,
+    // so a single request replaces the previous two
+    // (GET /semesters/:id/subjects + GET /semesters/:id).
     api
       .get(`/semesters/${id}`, {
         signal: controller.signal,
       })
       .then((res) => {
-        setSemester(res.data);
+        const { subjects: embeddedSubjects, ...semesterData } = res.data;
+        setSemester(semesterData);
+        setSubjects(embeddedSubjects || []);
       })
       .catch((error) => {
         if (isRequestCancelled(error)) {

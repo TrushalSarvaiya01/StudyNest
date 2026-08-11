@@ -58,6 +58,7 @@ function streamPdf(url, res, fileName, depth = 0) {
 router.get('/semesters', async (req, res) => {
   try {
     const semesters = await Semester.find().sort({ createdAt: 1 });
+    res.set('Cache-Control', 'public, max-age=30');
     res.json(semesters);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch semesters' });
@@ -68,6 +69,7 @@ router.get('/semesters', async (req, res) => {
 router.get('/departments', async (req, res) => {
   try {
     const departments = await Department.find().sort({ name: 1 }).lean();
+    res.set('Cache-Control', 'public, max-age=30');
     res.json(departments);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch departments' });
@@ -81,42 +83,73 @@ router.get('/departments/:id', async (req, res) => {
     const department = await Department.findById(req.params.id).lean();
     if (!department) return res.status(404).json({ message: 'Department not found' });
 
-    res.json(department);
+    // Embed semesters directly so DepartmentPage can make a single request
+    // instead of two (GET /departments/:id + GET /departments/:id/semesters).
+    const semesters = await getSemestersWithCounts(req.params.id);
+
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json({ ...department, semesters });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch department' });
   }
 });
 
-// Semesters for a department
+// Shared helper: semesters for a department, each annotated with
+// totalSubjects/totalPdfs. Used by both the standalone
+// /departments/:id/semesters endpoint (kept for backward compatibility)
+// and the merged /departments/:id response below.
+async function getSemestersWithCounts(departmentId) {
+  const departmentObjectId = new mongoose.Types.ObjectId(departmentId);
+  const semesters = await Semester.find({ departmentId }).sort({ createdAt: 1 }).lean();
+  const semesterIds = semesters.map((semester) => semester._id);
+
+  const [subjectCounts, pdfCounts] = await Promise.all([
+    Subject.aggregate([
+      { $match: { departmentId: departmentObjectId, semesterId: { $in: semesterIds } } },
+      { $group: { _id: '$semesterId', totalSubjects: { $sum: 1 } } },
+    ]),
+    Document.aggregate([
+      { $match: { departmentId: departmentObjectId, semesterId: { $in: semesterIds } } },
+      { $group: { _id: '$semesterId', totalPdfs: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const subjectCountMap = new Map(subjectCounts.map((item) => [String(item._id), item.totalSubjects]));
+  const pdfCountMap = new Map(pdfCounts.map((item) => [String(item._id), item.totalPdfs]));
+
+  return semesters.map((semester) => ({
+    ...semester,
+    totalSubjects: subjectCountMap.get(String(semester._id)) || 0,
+    totalPdfs: pdfCountMap.get(String(semester._id)) || 0,
+  }));
+}
+
+// Shared helper: subjects for a semester, each annotated with totalPdfs.
+// Used by both the standalone /semesters/:id/subjects endpoint (kept for
+// backward compatibility) and the merged /semesters/:id response below.
+async function getSubjectsWithCounts(semesterId) {
+  const subjects = await Subject.find({ semesterId }).sort({ name: 1 }).lean();
+  const subjectIds = subjects.map((subject) => subject._id);
+
+  const counts = await Document.aggregate([
+    { $match: { subjectId: { $in: subjectIds } } },
+    { $group: { _id: '$subjectId', totalPdfs: { $sum: 1 } } },
+  ]);
+
+  const countMap = new Map(counts.map((item) => [String(item._id), item.totalPdfs]));
+  return subjects.map((subject) => ({ ...subject, totalPdfs: countMap.get(String(subject._id)) || 0 }));
+}
+
+// Semesters for a department (standalone - kept for backward compatibility;
+// DepartmentPage now uses the embedded `semesters` field on /departments/:id
+// instead of calling this separately).
 router.get('/departments/:id/semesters', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Department not found' });
 
-    const departmentObjectId = new mongoose.Types.ObjectId(req.params.id);
-    const semesters = await Semester.find({ departmentId: req.params.id }).sort({ createdAt: 1 }).lean();
-    const semesterIds = semesters.map((semester) => semester._id);
-
-    const [subjectCounts, pdfCounts] = await Promise.all([
-      Subject.aggregate([
-        { $match: { departmentId: departmentObjectId, semesterId: { $in: semesterIds } } },
-        { $group: { _id: '$semesterId', totalSubjects: { $sum: 1 } } },
-      ]),
-      Document.aggregate([
-        { $match: { departmentId: departmentObjectId, semesterId: { $in: semesterIds } } },
-        { $group: { _id: '$semesterId', totalPdfs: { $sum: 1 } } },
-      ]),
-    ]);
-
-    const subjectCountMap = new Map(subjectCounts.map((item) => [String(item._id), item.totalSubjects]));
-    const pdfCountMap = new Map(pdfCounts.map((item) => [String(item._id), item.totalPdfs]));
-
-    res.json(
-      semesters.map((semester) => ({
-        ...semester,
-        totalSubjects: subjectCountMap.get(String(semester._id)) || 0,
-        totalPdfs: pdfCountMap.get(String(semester._id)) || 0,
-      }))
-    );
+    const semesters = await getSemestersWithCounts(req.params.id);
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(semesters);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch semesters for department' });
   }
@@ -129,12 +162,20 @@ router.get('/semesters/:id', async (req, res) => {
     const semester = await Semester.findById(req.params.id).populate('departmentId').lean();
     if (!semester) return res.status(404).json({ message: 'Semester not found' });
 
-    res.json(semester);
+    // Embed subjects directly so SemesterPage can make a single request
+    // instead of two (GET /semesters/:id + GET /semesters/:id/subjects).
+    const subjects = await getSubjectsWithCounts(req.params.id);
+
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json({ ...semester, subjects });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch semester' });
   }
 });
 
+// Subjects for a semester (standalone - kept for backward compatibility;
+// SemesterPage now uses the embedded `subjects` field on /semesters/:id
+// instead of calling this separately).
 router.get('/semesters/:id/subjects', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Semester not found' });
@@ -142,16 +183,9 @@ router.get('/semesters/:id/subjects', async (req, res) => {
     const semester = await Semester.findById(req.params.id);
     if (!semester) return res.status(404).json({ message: 'Semester not found' });
 
-    const subjects = await Subject.find({ semesterId: req.params.id }).sort({ name: 1 }).lean();
-
-    const subjectIds = subjects.map((subject) => subject._id);
-    const counts = await Document.aggregate([
-      { $match: { subjectId: { $in: subjectIds } } },
-      { $group: { _id: '$subjectId', totalPdfs: { $sum: 1 } } },
-    ]);
-
-    const countMap = new Map(counts.map((item) => [String(item._id), item.totalPdfs]));
-    res.json(subjects.map((subject) => ({ ...subject, totalPdfs: countMap.get(String(subject._id)) || 0 })));
+    const subjects = await getSubjectsWithCounts(req.params.id);
+    res.set('Cache-Control', 'public, max-age=30');
+    res.json(subjects);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch subjects' });
   }
@@ -183,6 +217,7 @@ router.get('/subjects/:id/documents', async (req, res) => {
       Document.countDocuments(filter),
     ]);
 
+    res.set('Cache-Control', 'public, max-age=30');
     res.json({ documents, ...buildMeta({ total, page, limit }) });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch documents' });
@@ -197,6 +232,7 @@ router.get('/subjects/:id', async (req, res) => {
     if (!subject) return res.status(404).json({ message: 'Subject not found' });
 
     const totalPdfs = await Document.countDocuments({ subjectId: req.params.id });
+    res.set('Cache-Control', 'public, max-age=30');
     res.json({ ...subject.toObject(), totalPdfs });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch subject' });
@@ -245,6 +281,7 @@ router.get('/overview', async (req, res) => {
       };
     });
 
+    res.set('Cache-Control', 'public, max-age=30');
     res.json({
       totals: {
         departmentCount: departments.length,
