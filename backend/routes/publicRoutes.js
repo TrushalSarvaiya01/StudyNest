@@ -203,49 +203,54 @@ router.get('/subjects/:id', async (req, res) => {
   }
 });
 
+// Groups a collection by departmentId and returns { deptIdString -> count }
+// via the database instead of pulling every document over the wire.
+function countByDepartment(Model) {
+  return Model.aggregate([
+    { $group: { _id: '$departmentId', count: { $sum: 1 } } },
+  ]).then((rows) => {
+    const map = new Map();
+    let total = 0;
+    rows.forEach((row) => {
+      map.set(String(row._id), row.count);
+      total += row.count;
+    });
+    return { map, total };
+  });
+}
+
 router.get('/overview', async (req, res) => {
   try {
-    // Build department-based overview
-    const [departments, subjects, recentDocuments] = await Promise.all([
+    // Every query below is independent, so they all run concurrently in a
+    // single Promise.all instead of one-after-another. The three counts are
+    // computed in MongoDB with $group (grouped by department), so we never
+    // pull the full Subject/Semester/Document collections into Node just to
+    // count them in JS - only the small, already-aggregated result comes
+    // back over the wire.
+    const [departments, semesterStats, subjectStats, documentStats, recentDocuments] = await Promise.all([
       Department.find().sort({ name: 1 }).lean(),
-      Subject.find().lean(),
+      countByDepartment(Semester),
+      countByDepartment(Subject),
+      countByDepartment(Document),
       Document.find().populate('departmentId').populate('semesterId').populate('subjectId').sort({ uploadDate: -1 }).limit(10).lean(),
     ]);
 
-    // Map semesters per department and subjects per department/semester
-    const semesterList = await Semester.find().lean();
-    const semestersByDept = new Map();
-    semesterList.forEach((s) => {
-      const key = String(s.departmentId);
-      semestersByDept.set(key, (semestersByDept.get(key) || 0) + 1);
+    const departmentsWithStats = departments.map((dept) => {
+      const key = String(dept._id);
+      return {
+        ...dept,
+        totalSemesters: semesterStats.map.get(key) || 0,
+        totalSubjects: subjectStats.map.get(key) || 0,
+        totalPdfs: documentStats.map.get(key) || 0,
+      };
     });
-
-    const subjectsByDept = new Map();
-    subjects.forEach((subject) => {
-      const key = String(subject.departmentId);
-      subjectsByDept.set(key, (subjectsByDept.get(key) || 0) + 1);
-    });
-
-    const pdfsByDept = new Map();
-    const allDocuments = await Document.find({}, { departmentId: 1 }).lean();
-    allDocuments.forEach((doc) => {
-      const key = String(doc.departmentId);
-      pdfsByDept.set(key, (pdfsByDept.get(key) || 0) + 1);
-    });
-
-    const departmentsWithStats = departments.map((dept) => ({
-      ...dept,
-      totalSemesters: semestersByDept.get(String(dept._id)) || 0,
-      totalSubjects: subjectsByDept.get(String(dept._id)) || 0,
-      totalPdfs: pdfsByDept.get(String(dept._id)) || 0,
-    }));
 
     res.json({
       totals: {
         departmentCount: departments.length,
-        semesterCount: semesterList.length,
-        subjectCount: subjects.length,
-        documentCount: allDocuments.length,
+        semesterCount: semesterStats.total,
+        subjectCount: subjectStats.total,
+        documentCount: documentStats.total,
       },
       departments: departmentsWithStats,
       recentDocuments,

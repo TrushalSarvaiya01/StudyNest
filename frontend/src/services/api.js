@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_URL =
+  process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
 const AUTH_STORAGE_KEYS = {
   token: 'token',
   username: 'username',
@@ -15,7 +17,11 @@ function getStorageValue(key) {
     return '';
   }
 
-  return window.localStorage.getItem(key) || window.sessionStorage.getItem(key) || '';
+  return (
+    window.localStorage.getItem(key) ||
+    window.sessionStorage.getItem(key) ||
+    ''
+  );
 }
 
 function setStorageValue(key, value) {
@@ -52,21 +58,42 @@ export const clearStoredAuth = () => {
 };
 
 export const decodeJwtPayload = (token) => {
-  const payload = String(token || '').split('.')[1];
-  if (!payload) {
+  try {
+    const payload = String(token || '').split('.')[1];
+
+    if (!payload) {
+      return null;
+    }
+
+    const normalized = payload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const padded = normalized.padEnd(
+      Math.ceil(normalized.length / 4) * 4,
+      '='
+    );
+
+    return JSON.parse(atob(padded));
+  } catch (error) {
     return null;
   }
-
-  const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-
-  return JSON.parse(atob(padded));
 };
 
 export const getAuthHeaders = (token) => ({
   Authorization: `Bearer ${token}`,
 });
 
-export const getDownloadUrl = (documentId) => `${API_URL}/documents/${documentId}/download`;
+export const getDownloadUrl = (documentId) =>
+  `${API_URL}/documents/${documentId}/download`;
+
+// Returns true when an Axios request was intentionally cancelled.
+export const isRequestCancelled = (error) => {
+  return (
+    axios.isCancel(error) ||
+    error?.code === 'ERR_CANCELED' ||
+    error?.name === 'CanceledError'
+  );
+};
 
 export default api;

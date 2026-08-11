@@ -10,7 +10,10 @@ import {
   Search,
 } from 'lucide-react';
 
-import api, { getDownloadUrl } from '../services/api';
+import api, {
+  getDownloadUrl,
+  isRequestCancelled,
+} from '../services/api';
 
 const features = [
   {
@@ -57,34 +60,37 @@ function HomePage() {
   const [results, setResults] = useState([]);
   const [loadingResults, setLoadingResults] = useState(false);
 
-  /*
-   * Load homepage overview data
-   */
+  // Load homepage overview.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     api
-      .get('/overview')
+      .get('/overview', {
+        signal: controller.signal,
+      })
       .then((res) => {
-        if (!cancelled) {
-          setOverview((prev) => ({
-            ...prev,
-            ...res.data,
-          }));
-        }
+        setOverview((prev) => ({
+          ...prev,
+          ...res.data,
+        }));
       })
       .catch((error) => {
-        console.error('Failed to load homepage overview:', error);
+        if (isRequestCancelled(error)) {
+          return;
+        }
+
+        console.error(
+          'Failed to load homepage overview:',
+          error
+        );
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, []);
 
-  /*
-   * Search documents
-   */
+  // Search documents.
   useEffect(() => {
     if (!searchQuery.trim()) {
       setResults([]);
@@ -97,7 +103,9 @@ function HomePage() {
     setLoadingResults(true);
 
     api
-      .get(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
+      .get(
+        `/search?q=${encodeURIComponent(searchQuery.trim())}`
+      )
       .then((res) => {
         if (!cancelled) {
           setResults(res.data?.documents || []);
@@ -121,24 +129,15 @@ function HomePage() {
     };
   }, [searchQuery]);
 
-  /*
-   * Search submit
-   */
   const handleSearch = (event) => {
     event.preventDefault();
     setSearchQuery(searchInput.trim());
   };
 
-  /*
-   * Search icon/button
-   */
   const handleSearchIconClick = () => {
     setSearchQuery(searchInput.trim());
   };
 
-  /*
-   * Clear search
-   */
   const clearSearch = () => {
     setSearchInput('');
     setSearchQuery('');
@@ -150,13 +149,6 @@ function HomePage() {
     [results]
   );
 
-  /*
-   * Departments
-   *
-   * Prefer overview.departments.
-   * Fallback to overview.semesters only if departments
-   * are not available.
-   */
   const departments =
     overview.departments?.length > 0
       ? overview.departments
@@ -165,10 +157,7 @@ function HomePage() {
   return (
     <div className="page-root home-page">
       <div className="container">
-
-        {/* =========================
-            SEARCH SECTION
-        ========================== */}
+        {/* SEARCH SECTION */}
         <section className="section-card home-search-section">
           <div className="home-search-header">
             <h1 className="home-page-title">
@@ -176,8 +165,8 @@ function HomePage() {
             </h1>
 
             <p className="muted-text home-page-subtitle">
-              Browse assignments, notes, books, previous papers and study
-              materials organized semester-wise.
+              Browse assignments, notes, books, previous papers and
+              study materials organized semester-wise.
             </p>
           </div>
 
@@ -252,9 +241,7 @@ function HomePage() {
           </div>
         </section>
 
-        {/* =========================
-            SEARCH RESULTS
-        ========================== */}
+        {/* SEARCH RESULTS */}
         <AnimatePresence>
           {searchQuery.trim() && (
             <motion.section
@@ -346,9 +333,7 @@ function HomePage() {
           )}
         </AnimatePresence>
 
-        {/* =========================
-            FEATURES
-        ========================== */}
+        {/* FEATURES */}
         <section className="home-features-section">
           <h2 className="section-title">
             Everything you need to study efficiently
@@ -378,9 +363,7 @@ function HomePage() {
           </div>
         </section>
 
-        {/* =========================
-            DEPARTMENTS
-        ========================== */}
+        {/* DEPARTMENTS */}
         <section
           className="section-card"
           id="departments"
@@ -409,7 +392,6 @@ function HomePage() {
                 >
                   <div className="semester-gradient">
                     <GraduationCap size={18} />
-
                     <span>{dept.name}</span>
                   </div>
 
@@ -452,9 +434,7 @@ function HomePage() {
           )}
         </section>
 
-        {/* =========================
-            RECENT UPLOADS
-        ========================== */}
+        {/* RECENT UPLOADS */}
         <section className="section-card">
           <div className="section-heading-row">
             <div>
@@ -512,7 +492,6 @@ function HomePage() {
             </p>
           )}
         </section>
-
       </div>
     </div>
   );
