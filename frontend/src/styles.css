@@ -1939,3 +1939,219 @@ th {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =========================================================
+   FORMAT BADGES (MULTI-FORMAT: PDF, DOCX, DOC, JPG, PNG)
+========================================================= */
+
+.badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.format-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+
+.format-badge--pdf {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.format-badge--docx,
+.format-badge--doc {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.format-badge--png {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.format-badge--jpg,
+.format-badge--jpeg {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+/* =========================================================
+   SKELETON LOADERS
+========================================================= */
+
+.skeleton-card {
+  pointer-events: none;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-line {
+  background: linear-gradient(
+    90deg,
+    #f1f5f9 0%,
+    #e2e8f0 50%,
+    #f1f5f9 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-badge {
+  width: 70px;
+  height: 20px;
+  margin-bottom: 0.8rem;
+}
+
+.skeleton-title {
+  width: 80%;
+  height: 22px;
+  margin-bottom: 0.6rem;
+}
+
+.skeleton-subtitle {
+  width: 50%;
+  height: 16px;
+  margin-bottom: 1.2rem;
+}
+
+.skeleton-btn {
+  width: 100%;
+  height: 38px;
+  border-radius: 10px;
+}
+
+/* =========================================================
+   ADMIN TABS
+========================================================= */
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.2rem 0;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: #f8fafc;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-button:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+.tab-button.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+/* =========================================================
+   DROPZONE WITH FILE
+========================================================= */
+
+.dropzone--has-file {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.dropzone-file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #1e40af;
+}
+
+.font-12 {
+  font-size: 0.78rem;
+}
+
+.ml-8 {
+  margin-left: 0.5rem;
+}
+
+.form-message--success {
+  color: #15803d;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+}
+
+.form-message--error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+}
+
+/* =========================================================
+   ERROR BOUNDARY
+========================================================= */
+
+.error-boundary-wrap {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.error-boundary-card {
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+}
+
+.error-boundary-icon {
+  width: 56px;
+  height: 56px;
+  background: #fef2f2;
+  color: #dc2626;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.2rem;
+}

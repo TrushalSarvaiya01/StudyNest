@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 import {
   clearStoredAuth,
   decodeJwtPayload,
@@ -93,52 +94,55 @@ function App() {
       mobileSidebarOpen={mobileSidebarOpen}
       setMobileSidebarOpen={setMobileSidebarOpen}
     >
-      <Suspense fallback={<div className="page-loader">Loading…</div>}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/semester/:id" element={<SemesterPage />} />
-          <Route path="/department/:id" element={<DepartmentPage />} />
-          <Route path="/subject/:id" element={<SubjectPage />} />
-          <Route path="/login" element={<LoginPage setAuth={setAuth} />} />
+      <ErrorBoundary>
+        <Suspense fallback={<div className="page-loader">Loading…</div>}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/semester/:id" element={<SemesterPage />} />
+            <Route path="/department/:id" element={<DepartmentPage />} />
+            <Route path="/subject/:id" element={<SubjectPage />} />
+            <Route path="/login" element={<LoginPage setAuth={setAuth} />} />
 
-          <Route
-            path="/admin"
-            element={(
-              <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <AdminDashboard auth={auth} onLogout={logout} />
-              </ProtectedRoute>
-            )}
-          />
-          <Route
-            path="/admin/upload"
-            element={(
-              <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <AdminUploadPage auth={auth} onLogout={logout} />
-              </ProtectedRoute>
-            )}
-          />
-          <Route
-            path="/admin/files"
-            element={(
-              <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <AdminFilesPage auth={auth} onLogout={logout} />
-              </ProtectedRoute>
-            )}
-          />
-          <Route
-            path="/admin/manage"
-            element={(
-              <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <AdminManagePage auth={auth} onLogout={logout} />
-              </ProtectedRoute>
-            )}
-          />
+            <Route
+              path="/admin"
+              element={(
+                <ProtectedRoute isAuthenticated={isAuthenticated}>
+                  <AdminDashboard auth={auth} onLogout={logout} />
+                </ProtectedRoute>
+              )}
+            />
+            <Route
+              path="/admin/upload"
+              element={(
+                <ProtectedRoute isAuthenticated={isAuthenticated}>
+                  <AdminUploadPage auth={auth} onLogout={logout} />
+                </ProtectedRoute>
+              )}
+            />
+            <Route
+              path="/admin/files"
+              element={(
+                <ProtectedRoute isAuthenticated={isAuthenticated}>
+                  <AdminFilesPage auth={auth} onLogout={logout} />
+                </ProtectedRoute>
+              )}
+            />
+            <Route
+              path="/admin/manage"
+              element={(
+                <ProtectedRoute isAuthenticated={isAuthenticated}>
+                  <AdminManagePage auth={auth} onLogout={logout} />
+                </ProtectedRoute>
+              )}
+            />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     </AppShell>
   );
 }
 
 export default App;
+

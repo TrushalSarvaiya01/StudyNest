@@ -44,7 +44,7 @@ function Navbar({ auth, onLogout, onMenuToggle, mobileSidebarOpen, isAdminLayout
       main,
       admin: [
         { label: 'Dashboard', to: '/admin', icon: LayoutDashboard },
-        { label: 'Upload PDF', to: '/admin/upload', icon: Upload },
+        { label: 'Upload Document', to: '/admin/upload', icon: Upload },
         { label: 'Documents', to: '/admin/files', icon: Files },
         { label: 'Departments', to: '/admin/manage?section=departments', icon: Building2 },
         { label: 'Semesters', to: '/admin/manage?section=semesters', icon: GraduationCap },

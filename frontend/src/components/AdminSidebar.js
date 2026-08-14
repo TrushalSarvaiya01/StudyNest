@@ -10,7 +10,7 @@ const publicItems = [
 
 const adminItems = [
   { label: 'Dashboard', to: '/admin', icon: LayoutDashboard },
-  { label: 'Upload PDF', to: '/admin/upload', icon: Upload },
+  { label: 'Upload Document', to: '/admin/upload', icon: Upload },
   { label: 'Manage Documents', to: '/admin/files', icon: Files },
   { label: 'Manage Departments', to: '/admin/manage?section=departments', icon: Building2 },
   { label: 'Manage Semesters', to: '/admin/manage?section=semesters', icon: GraduationCap },

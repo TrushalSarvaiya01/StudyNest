@@ -9,13 +9,12 @@ function DepartmentPage() {
 
   const [department, setDepartment] = useState(null);
   const [semesters, setSemesters] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
 
-    // /departments/:id now returns the department with its semesters
-    // embedded, so a single request replaces the previous two
-    // (GET /departments/:id + GET /departments/:id/semesters).
     api
       .get(`/departments/${id}`, {
         signal: controller.signal,
@@ -26,11 +25,12 @@ function DepartmentPage() {
         setSemesters(embeddedSemesters || []);
       })
       .catch((error) => {
-        if (isRequestCancelled(error)) {
-          return;
+        if (!isRequestCancelled(error)) {
+          console.error('Failed to load department:', error);
         }
-
-        console.error('Failed to load department:', error);
+      })
+      .finally(() => {
+        setLoading(false);
       });
 
     return () => {
@@ -56,31 +56,42 @@ function DepartmentPage() {
         <h1>{department?.name || 'Department'}</h1>
 
         <p className="muted-text">
-          Choose a semester to explore subjects and documents for this
-          department.
+          Choose a semester to explore subjects and study resources for this department.
         </p>
       </section>
 
       <section className="section-card">
         <h2 className="section-title">Semesters</h2>
 
-        <div className="premium-semester-grid">
-          {semesters.length > 0 ? (
-            semesters.map((semester) => (
-              <SemesterCard
-                key={semester._id}
-                semester={semester}
-              />
-            ))
-          ) : (
-            <p className="muted-text">
-              No semesters have been added for this department yet.
-            </p>
-          )}
-        </div>
+        {loading ? (
+          <div className="premium-semester-grid">
+            {[1, 2, 3, 4].map((k) => (
+              <div key={k} className="premium-semester-card skeleton-card">
+                <div className="skeleton-line skeleton-title" />
+                <div className="skeleton-line skeleton-subtitle" />
+                <div className="skeleton-line skeleton-btn" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="premium-semester-grid">
+            {semesters.length > 0 ? (
+              semesters.map((semester) => (
+                <SemesterCard
+                  key={semester._id}
+                  semester={semester}
+                />
+              ))
+            ) : (
+              <p className="muted-text">
+                No semesters have been added for this department yet.
+              </p>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
 }
 
-export default DepartmentPage;
+export default DepartmentPage;

@@ -13,7 +13,20 @@ const { parsePagination, parseSort, buildMeta } = require('../utils/queryHelpers
 
 const router = express.Router();
 
-const upload = multer({ storage: multer.memoryStorage() });
+const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+  fileFilter: (req, file, cb) => {
+    const ext = (file.originalname.split('.').pop() || '').toLowerCase();
+    if (ALLOWED_EXTENSIONS.has(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Allowed: PDF, Word (.doc, .docx), JPG, PNG'));
+    }
+  },
+});
 
 const DOCUMENT_SORT_OPTIONS = {
   newest: { uploadDate: -1 },
@@ -22,10 +35,13 @@ const DOCUMENT_SORT_OPTIONS = {
   title_desc: { title: -1 },
 };
 
-function normalizePdfFileName(name = 'document.pdf') {
-  const trimmed = String(name).trim() || 'document.pdf';
-  const sanitized = trimmed.replace(/[^a-zA-Z0-9._-]+/g, '_');
-  return sanitized.toLowerCase().endsWith('.pdf') ? sanitized : `${sanitized}.pdf`;
+function normalizeDownloadFileName(originalName, title, format = 'pdf') {
+  const ext = format || 'pdf';
+  const base = String(originalName || title || 'document')
+    .trim()
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return `${base || 'document'}.${ext}`;
 }
 
 function normalizeSemesterName(value) {
@@ -75,7 +91,7 @@ router.post('/admin/department', async (req, res) => {
 
 router.get('/admin/departments', async (req, res) => {
   try {
-    const departments = await Department.find().sort({ name: 1 });
+    const departments = await Department.find().sort({ name: 1 }).lean();
     res.json(departments);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch departments' });
@@ -153,15 +169,25 @@ router.post('/admin/document', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
+    const rawExt = (req.file.originalname.split('.').pop() || 'pdf').toLowerCase();
+    const fileFormat = ALLOWED_EXTENSIONS.has(rawExt) ? rawExt : 'pdf';
+    const isImage = ['jpg', 'jpeg', 'png'].includes(fileFormat);
+    const resourceType = isImage ? 'image' : 'raw';
+
     const uploadStream = cloudinary.uploader.upload_stream(
-      { folder: 'study-portal', resource_type: 'raw' },
+      { folder: 'study-portal', resource_type: resourceType },
       async (error, result) => {
         if (error) {
+          console.error('Cloudinary upload error:', error);
           return res.status(500).json({ message: 'Cloudinary upload failed' });
         }
 
         const { departmentId, semesterId, subjectId } = req.body;
-        if (!departmentId || !semesterId || !subjectId) return res.status(400).json({ message: 'departmentId, semesterId and subjectId are required' });
+        if (!departmentId || !semesterId || !subjectId) {
+          return res.status(400).json({ message: 'departmentId, semesterId and subjectId are required' });
+        }
+
+        const fileName = normalizeDownloadFileName(req.file.originalname, req.body.title, fileFormat);
 
         const document = new Document({
           title: req.body.title,
@@ -169,7 +195,9 @@ router.post('/admin/document', upload.single('file'), async (req, res) => {
           departmentId,
           semesterId,
           subjectId,
-          originalFileName: normalizePdfFileName(req.file.originalname || req.body.title || 'document.pdf'),
+          fileFormat,
+          fileSize: req.file.size || 0,
+          originalFileName: fileName,
           cloudinaryUrl: result.secure_url,
           cloudinaryPublicId: result.public_id,
         });
@@ -181,7 +209,7 @@ router.post('/admin/document', upload.single('file'), async (req, res) => {
 
     streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
   } catch (error) {
-    res.status(500).json({ message: 'Document upload failed' });
+    res.status(500).json({ message: error.message || 'Document upload failed' });
   }
 });
 
@@ -204,7 +232,8 @@ router.get('/admin/documents', async (req, res) => {
         .populate('departmentId')
         .sort(sort)
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       Document.countDocuments(filter),
     ]);
 
@@ -313,7 +342,12 @@ router.delete('/admin/document/:id', async (req, res) => {
     if (!document) return res.status(404).json({ message: 'Document not found' });
 
     if (document.cloudinaryPublicId) {
-      await cloudinary.uploader.destroy(document.cloudinaryPublicId, { resource_type: 'raw' });
+      const isImage = ['jpg', 'jpeg', 'png'].includes(document.fileFormat);
+      try {
+        await cloudinary.uploader.destroy(document.cloudinaryPublicId, { resource_type: isImage ? 'image' : 'raw' });
+      } catch (cloudErr) {
+        console.warn('Cloudinary destroy error (continuing with DB deletion):', cloudErr);
+      }
     }
 
     await Document.findByIdAndDelete(req.params.id);
@@ -325,10 +359,12 @@ router.delete('/admin/document/:id', async (req, res) => {
 
 router.get('/admin/stats', async (req, res) => {
   try {
-    const departmentCount = await Department.countDocuments();
-    const semesterCount = await Semester.countDocuments();
-    const subjectCount = await Subject.countDocuments();
-    const documentCount = await Document.countDocuments();
+    const [departmentCount, semesterCount, subjectCount, documentCount] = await Promise.all([
+      Department.countDocuments(),
+      Semester.countDocuments(),
+      Subject.countDocuments(),
+      Document.countDocuments(),
+    ]);
     res.json({ departmentCount, semesterCount, subjectCount, documentCount });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch admin stats' });
@@ -342,7 +378,8 @@ router.get('/admin/recent-documents', async (req, res) => {
       .populate('semesterId')
       .populate('subjectId')
       .sort({ uploadDate: -1 })
-      .limit(8);
+      .limit(8)
+      .lean();
 
     res.json(documents);
   } catch (error) {
@@ -351,3 +388,4 @@ router.get('/admin/recent-documents', async (req, res) => {
 });
 
 module.exports = router;
+

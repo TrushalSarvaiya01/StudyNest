@@ -19,35 +19,53 @@ const DOCUMENT_SORT_OPTIONS = {
   title_desc: { title: -1 },
 };
 
+const MIME_TYPES = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+};
+
 function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
-function normalizePdfFileName(name = 'document.pdf') {
-  const trimmed = String(name).trim() || 'document.pdf';
-  const sanitized = trimmed.replace(/[^a-zA-Z0-9._-]+/g, '_');
-  return sanitized.toLowerCase().endsWith('.pdf') ? sanitized : `${sanitized}.pdf`;
+function getFileExtension(filename = '', defaultExt = 'pdf') {
+  const parts = String(filename).trim().split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : defaultExt;
 }
 
-function streamPdf(url, res, fileName, depth = 0) {
+function normalizeDownloadFileName(originalName, title, format = 'pdf') {
+  const ext = format || getFileExtension(originalName, 'pdf');
+  const base = String(originalName || title || 'document')
+    .trim()
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return `${base || 'document'}.${ext}`;
+}
+
+function streamFile(url, res, fileName, format = 'pdf', depth = 0) {
   if (depth > 4) {
-    res.status(502).json({ message: 'Too many redirects while fetching PDF' });
+    res.status(502).json({ message: 'Too many redirects while fetching file' });
     return;
   }
 
   https.get(url, (streamRes) => {
     const redirectCodes = [301, 302, 303, 307, 308];
     if (redirectCodes.includes(streamRes.statusCode) && streamRes.headers.location) {
-      streamPdf(streamRes.headers.location, res, fileName, depth + 1);
+      streamFile(streamRes.headers.location, res, fileName, format, depth + 1);
       return;
     }
 
     if (streamRes.statusCode !== 200) {
-      res.status(502).json({ message: 'Failed to fetch source PDF from cloud storage' });
+      res.status(502).json({ message: 'Failed to fetch source file from cloud storage' });
       return;
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
+    const contentType = MIME_TYPES[format.toLowerCase()] || streamRes.headers['content-type'] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     streamRes.pipe(res);
   }).on('error', () => {
@@ -57,7 +75,7 @@ function streamPdf(url, res, fileName, depth = 0) {
 
 router.get('/semesters', async (req, res) => {
   try {
-    const semesters = await Semester.find().sort({ createdAt: 1 });
+    const semesters = await Semester.find().sort({ createdAt: 1 }).lean();
     res.set('Cache-Control', 'public, max-age=30');
     res.json(semesters);
   } catch (error) {
@@ -83,8 +101,7 @@ router.get('/departments/:id', async (req, res) => {
     const department = await Department.findById(req.params.id).lean();
     if (!department) return res.status(404).json({ message: 'Department not found' });
 
-    // Embed semesters directly so DepartmentPage can make a single request
-    // instead of two (GET /departments/:id + GET /departments/:id/semesters).
+    // Embed semesters directly so DepartmentPage makes a single request
     const semesters = await getSemestersWithCounts(req.params.id);
 
     res.set('Cache-Control', 'public, max-age=30');
@@ -94,10 +111,7 @@ router.get('/departments/:id', async (req, res) => {
   }
 });
 
-// Shared helper: semesters for a department, each annotated with
-// totalSubjects/totalPdfs. Used by both the standalone
-// /departments/:id/semesters endpoint (kept for backward compatibility)
-// and the merged /departments/:id response below.
+// Shared helper: semesters for a department, each annotated with totalSubjects/totalPdfs
 async function getSemestersWithCounts(departmentId) {
   const departmentObjectId = new mongoose.Types.ObjectId(departmentId);
   const semesters = await Semester.find({ departmentId }).sort({ createdAt: 1 }).lean();
@@ -124,9 +138,7 @@ async function getSemestersWithCounts(departmentId) {
   }));
 }
 
-// Shared helper: subjects for a semester, each annotated with totalPdfs.
-// Used by both the standalone /semesters/:id/subjects endpoint (kept for
-// backward compatibility) and the merged /semesters/:id response below.
+// Shared helper: subjects for a semester, each annotated with totalPdfs
 async function getSubjectsWithCounts(semesterId) {
   const subjects = await Subject.find({ semesterId }).sort({ name: 1 }).lean();
   const subjectIds = subjects.map((subject) => subject._id);
@@ -140,9 +152,6 @@ async function getSubjectsWithCounts(semesterId) {
   return subjects.map((subject) => ({ ...subject, totalPdfs: countMap.get(String(subject._id)) || 0 }));
 }
 
-// Semesters for a department (standalone - kept for backward compatibility;
-// DepartmentPage now uses the embedded `semesters` field on /departments/:id
-// instead of calling this separately).
 router.get('/departments/:id/semesters', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Department not found' });
@@ -162,8 +171,6 @@ router.get('/semesters/:id', async (req, res) => {
     const semester = await Semester.findById(req.params.id).populate('departmentId').lean();
     if (!semester) return res.status(404).json({ message: 'Semester not found' });
 
-    // Embed subjects directly so SemesterPage can make a single request
-    // instead of two (GET /semesters/:id + GET /semesters/:id/subjects).
     const subjects = await getSubjectsWithCounts(req.params.id);
 
     res.set('Cache-Control', 'public, max-age=30');
@@ -173,14 +180,11 @@ router.get('/semesters/:id', async (req, res) => {
   }
 });
 
-// Subjects for a semester (standalone - kept for backward compatibility;
-// SemesterPage now uses the embedded `subjects` field on /semesters/:id
-// instead of calling this separately).
 router.get('/semesters/:id/subjects', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Semester not found' });
 
-    const semester = await Semester.findById(req.params.id);
+    const semester = await Semester.findById(req.params.id).lean();
     if (!semester) return res.status(404).json({ message: 'Semester not found' });
 
     const subjects = await getSubjectsWithCounts(req.params.id);
@@ -195,7 +199,7 @@ router.get('/subjects/:id/documents', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Subject not found' });
 
-    const subject = await Subject.findById(req.params.id);
+    const subject = await Subject.findById(req.params.id).lean();
     if (!subject) return res.status(404).json({ message: 'Subject not found' });
 
     const { page, limit, skip } = parsePagination(req);
@@ -213,7 +217,8 @@ router.get('/subjects/:id/documents', async (req, res) => {
         .populate('semesterId')
         .sort(sort)
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       Document.countDocuments(filter),
     ]);
 
@@ -228,19 +233,20 @@ router.get('/subjects/:id', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Subject not found' });
 
-    const subject = await Subject.findById(req.params.id).populate('semesterId');
+    const subject = await Subject.findById(req.params.id)
+      .populate('semesterId')
+      .populate('departmentId')
+      .lean();
     if (!subject) return res.status(404).json({ message: 'Subject not found' });
 
     const totalPdfs = await Document.countDocuments({ subjectId: req.params.id });
     res.set('Cache-Control', 'public, max-age=30');
-    res.json({ ...subject.toObject(), totalPdfs });
+    res.json({ ...subject, totalPdfs });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch subject' });
   }
 });
 
-// Groups a collection by departmentId and returns { deptIdString -> count }
-// via the database instead of pulling every document over the wire.
 function countByDepartment(Model) {
   return Model.aggregate([
     { $group: { _id: '$departmentId', count: { $sum: 1 } } },
@@ -257,18 +263,18 @@ function countByDepartment(Model) {
 
 router.get('/overview', async (req, res) => {
   try {
-    // Every query below is independent, so they all run concurrently in a
-    // single Promise.all instead of one-after-another. The three counts are
-    // computed in MongoDB with $group (grouped by department), so we never
-    // pull the full Subject/Semester/Document collections into Node just to
-    // count them in JS - only the small, already-aggregated result comes
-    // back over the wire.
     const [departments, semesterStats, subjectStats, documentStats, recentDocuments] = await Promise.all([
       Department.find().sort({ name: 1 }).lean(),
       countByDepartment(Semester),
       countByDepartment(Subject),
       countByDepartment(Document),
-      Document.find().populate('departmentId').populate('semesterId').populate('subjectId').sort({ uploadDate: -1 }).limit(10).lean(),
+      Document.find()
+        .populate('departmentId')
+        .populate('semesterId')
+        .populate('subjectId')
+        .sort({ uploadDate: -1 })
+        .limit(10)
+        .lean(),
     ]);
 
     const departmentsWithStats = departments.map((dept) => {
@@ -317,44 +323,60 @@ router.post('/admin/login', async (req, res) => {
 router.get('/search', async (req, res) => {
   const { q } = req.query;
   try {
-    const search = (q || '').trim();
+    const search = String(q || '').trim();
     if (!search) return res.json({ documents: [], total: 0, page: 1, limit: 0, totalPages: 1 });
 
     const { page, limit, skip } = parsePagination(req, 20);
     const { sort } = parseSort(req, DOCUMENT_SORT_OPTIONS, 'newest');
 
-    const lowered = search.toLowerCase();
-    const documents = await Document.find()
-      .populate('departmentId')
-      .populate('subjectId')
-      .populate('semesterId')
-      .sort(sort);
+    // Escape special regex characters safely
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = new RegExp(escaped, 'i');
 
-    let filtered = documents.filter((doc) => {
-      const departmentName = String(doc.departmentId?.name || '').toLowerCase();
-      const semesterName = String(doc.semesterId?.name || '').toLowerCase();
-      const subjectName = String(doc.subjectId?.name || '').toLowerCase();
-      const title = String(doc.title || '').toLowerCase();
-      const type = String(doc.type || '').toLowerCase();
+    // Fast indexed parallel lookup for matching parents
+    const [matchingDepts, matchingSems, matchingSubs] = await Promise.all([
+      Department.find({ name: searchRegex }).select('_id').lean(),
+      Semester.find({ name: searchRegex }).select('_id').lean(),
+      Subject.find({ name: searchRegex }).select('_id').lean(),
+    ]);
 
-      return (
-        departmentName.includes(lowered) ||
-        semesterName.includes(lowered) ||
-        subjectName.includes(lowered) ||
-        title.includes(lowered) ||
-        type.includes(lowered)
-      );
-    });
+    const orConditions = [
+      { title: searchRegex },
+      { originalFileName: searchRegex },
+      { type: searchRegex },
+    ];
 
-    if (req.query.type) {
-      filtered = filtered.filter((doc) => doc.type === req.query.type);
+    if (matchingDepts.length > 0) {
+      orConditions.push({ departmentId: { $in: matchingDepts.map((d) => d._id) } });
+    }
+    if (matchingSems.length > 0) {
+      orConditions.push({ semesterId: { $in: matchingSems.map((s) => s._id) } });
+    }
+    if (matchingSubs.length > 0) {
+      orConditions.push({ subjectId: { $in: matchingSubs.map((s) => s._id) } });
     }
 
-    const total = filtered.length;
-    const paged = filtered.slice(skip, skip + limit);
+    const filter = { $or: orConditions };
+    if (req.query.type) {
+      filter.type = req.query.type;
+    }
 
-    res.json({ documents: paged, ...buildMeta({ total, page, limit }) });
+    // Direct MongoDB indexed execution with skip, limit and lean
+    const [documents, total] = await Promise.all([
+      Document.find(filter)
+        .populate('departmentId')
+        .populate('subjectId')
+        .populate('semesterId')
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Document.countDocuments(filter),
+    ]);
+
+    res.json({ documents, ...buildMeta({ total, page, limit }) });
   } catch (error) {
+    console.error('Search query error:', error);
     res.status(500).json({ message: 'Search failed' });
   }
 });
@@ -363,15 +385,19 @@ router.get('/documents/:id/download', async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Document not found' });
 
-    const document = await Document.findById(req.params.id);
+    const document = await Document.findById(req.params.id).lean();
     if (!document) return res.status(404).json({ message: 'Document not found' });
 
-    const fileName = normalizePdfFileName(document.originalFileName || `${document.title}.pdf`);
+    const fileName = normalizeDownloadFileName(
+      document.originalFileName,
+      document.title,
+      document.fileFormat || 'pdf'
+    );
 
-    streamPdf(document.cloudinaryUrl, res, fileName);
+    streamFile(document.cloudinaryUrl, res, fileName, document.fileFormat || 'pdf');
   } catch (error) {
     res.status(500).json({ message: 'Download failed' });
   }
 });
 
-module.exports = router;
+module.exports = router;

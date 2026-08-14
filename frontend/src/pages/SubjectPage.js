@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { FileText, GraduationCap, ExternalLink, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { FileText, GraduationCap, Download, ChevronLeft, ChevronRight, File, Image, FileCode } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import Breadcrumbs from '../components/Breadcrumbs';
-import api, { getDownloadUrl } from '../services/api';
+import api, { getDownloadUrl, getFileFormat, formatFileSize, isRequestCancelled } from '../services/api';
 
 const DOCUMENT_TYPES = ['Assignment', 'Book', 'Notes', 'Other'];
 const SORT_OPTIONS = [
@@ -11,6 +11,20 @@ const SORT_OPTIONS = [
   { value: 'title_asc', label: 'Title A-Z' },
   { value: 'title_desc', label: 'Title Z-A' },
 ];
+
+function getFormatIcon(format) {
+  switch (format) {
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+      return <Image size={13} />;
+    case 'doc':
+    case 'docx':
+      return <FileCode size={13} />;
+    default:
+      return <File size={13} />;
+  }
+}
 
 function SubjectPage() {
   const { id } = useParams();
@@ -21,39 +35,66 @@ function SubjectPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [type, setType] = useState('');
   const [sort, setSort] = useState('newest');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Load subject details and breadcrumbs data
   useEffect(() => {
-    api.get(`/subjects/${id}`).then((res) => setSubject(res.data));
+    const controller = new AbortController();
+    api.get(`/subjects/${id}`, { signal: controller.signal })
+      .then((res) => setSubject(res.data))
+      .catch((err) => {
+        if (!isRequestCancelled(err)) console.error('Failed to load subject:', err);
+      });
+
+    return () => controller.abort();
   }, [id]);
 
-  // Reset to page 1 whenever a filter/sort changes (a fresh filter should not
-  // stay stuck on a page number that may no longer exist in the new result set)
-  useEffect(() => {
-    setPage(1);
-  }, [type, sort, id]);
-
-  useEffect(() => {
+  // Single controlled data fetch - eliminating double-fetch race conditions
+  const fetchDocs = useCallback(() => {
+    const controller = new AbortController();
     setLoading(true);
+
     const params = new URLSearchParams({ page: String(page), limit: '9', sort });
     if (type) params.set('type', type);
 
     api
-      .get(`/subjects/${id}/documents?${params.toString()}`)
+      .get(`/subjects/${id}/documents?${params.toString()}`, { signal: controller.signal })
       .then((res) => {
         setDocuments(res.data.documents || []);
         setTotal(res.data.total || 0);
         setTotalPages(res.data.totalPages || 1);
       })
+      .catch((err) => {
+        if (!isRequestCancelled(err)) console.error('Failed to load documents:', err);
+      })
       .finally(() => setLoading(false));
+
+    return () => controller.abort();
   }, [id, page, type, sort]);
+
+  useEffect(() => {
+    const cleanup = fetchDocs();
+    return () => cleanup && cleanup();
+  }, [fetchDocs]);
+
+  const handleTypeChange = (e) => {
+    setType(e.target.value);
+    setPage(1);
+  };
+
+  const handleSortChange = (e) => {
+    setSort(e.target.value);
+    setPage(1);
+  };
+
+  const departmentObj = subject?.departmentId || subject?.semesterId?.departmentId;
 
   return (
     <div className="space-y-24">
       <Breadcrumbs
         items={[
           { label: 'Home', to: '/' },
-          ...(subject?.semesterId?.departmentId ? [{ label: subject.semesterId.departmentId.name, to: `/department/${subject.semesterId.departmentId._id}` }] : []),
+          ...(departmentObj ? [{ label: departmentObj.name, to: `/department/${departmentObj._id}` }] : []),
           ...(subject?.semesterId ? [{ label: subject.semesterId.name, to: `/semester/${subject.semesterId._id}` }] : []),
           { label: subject?.name || 'Subject' },
         ]}
@@ -61,52 +102,71 @@ function SubjectPage() {
 
       <section className="section-card compact-hero">
         <h1>{subject?.name || 'Subject Documents'}</h1>
-        <p className="muted-text">Professional document access with instant preview and reliable .pdf downloads.</p>
+        <p className="muted-text">Access study resources with instant in-browser preview and fast downloads for PDF, Word documents, and images.</p>
       </section>
 
       <section className="section-card">
         <div className="list-toolbar">
-          <h2 className="section-title">Available PDFs ({total})</h2>
+          <h2 className="section-title">Available Resources ({total})</h2>
           <div className="list-toolbar-controls">
-            <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type">
+            <select value={type} onChange={handleTypeChange} aria-label="Filter by type">
               <option value="">All types</option>
               {DOCUMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort documents">
+            <select value={sort} onChange={handleSortChange} aria-label="Sort documents">
               {SORT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
           </div>
         </div>
 
         {loading ? (
-          <p className="muted-text">Loading documents…</p>
+          <div className="document-grid">
+            {[1, 2, 3, 4, 5, 6].map((k) => (
+              <div key={k} className="document-card skeleton-card">
+                <div className="skeleton-line skeleton-badge" />
+                <div className="skeleton-line skeleton-title" />
+                <div className="skeleton-line skeleton-subtitle" />
+                <div className="skeleton-line skeleton-btn" />
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="document-grid">
-            {documents.length > 0 ? documents.map((doc) => (
-              <article key={doc._id} className="document-card">
-                <div className="card-top">
-                  <span className="type-badge">{doc.type}</span>
-                  <span className="muted-text">{new Date(doc.uploadDate).toLocaleDateString()}</span>
-                </div>
+            {documents.length > 0 ? documents.map((doc) => {
+              const format = getFileFormat(doc);
+              const downloadUrl = getDownloadUrl(doc._id);
 
-                <h3>{doc.title}</h3>
-                <div className="doc-meta-list">
-                  <span><GraduationCap size={15} /> {doc.semesterId?.name}</span>
-                  <span><FileText size={15} /> {doc.subjectId?.name}</span>
-                </div>
+              return (
+                <article key={doc._id} className="document-card">
+                  <div className="card-top">
+                    <div className="badge-group">
+                      <span className="type-badge">{doc.type}</span>
+                      <span className={`format-badge format-badge--${format}`}>
+                        {getFormatIcon(format)}
+                        <span>{format.toUpperCase()}</span>
+                      </span>
+                    </div>
+                    <span className="muted-text">
+                      {doc.uploadDate ? new Date(doc.uploadDate).toLocaleDateString() : ''}
+                    </span>
+                  </div>
 
-                <div className="card-actions">
-                  <a className="btn-primary" href={doc.cloudinaryUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink size={16} />
-                    <span>View</span>
-                  </a>
-                  <a className="btn-secondary" href={getDownloadUrl(doc._id)}>
-                    <Download size={16} />
-                    <span>Download</span>
-                  </a>
-                </div>
-              </article>
-            )) : (
+                  <h3>{doc.title}</h3>
+                  <div className="doc-meta-list">
+                    <span><GraduationCap size={15} /> {doc.semesterId?.name || 'Semester'}</span>
+                    <span><FileText size={15} /> {doc.subjectId?.name || 'Subject'}</span>
+                    {doc.fileSize > 0 && <span className="muted-text font-12">{formatFileSize(doc.fileSize)}</span>}
+                  </div>
+
+                  <div className="card-actions">
+                    <a className="btn-primary w-full" href={downloadUrl}>
+                      <Download size={16} />
+                      <span>Download</span>
+                    </a>
+                  </div>
+                </article>
+              );
+            }) : (
               <p className="muted-text">No documents match these filters.</p>
             )}
           </div>
@@ -129,3 +189,4 @@ function SubjectPage() {
 }
 
 export default SubjectPage;
+
