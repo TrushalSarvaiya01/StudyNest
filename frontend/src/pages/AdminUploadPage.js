@@ -3,7 +3,7 @@ import { CloudUpload, File, FileCode, Image, LoaderCircle } from 'lucide-react';
 import api, { formatFileSize } from '../services/api';
 
 const ALLOWED_EXTS = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
-const MAX_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+const MAX_SIZE_BYTES = 10 * 1024 * 1024; 
 
 function getFileIcon(ext) {
   switch (ext) {
@@ -75,7 +75,7 @@ function AdminUploadPage() {
 
     if (file.size > MAX_SIZE_BYTES) {
       setIsSuccess(false);
-      setMessage(`File exceeds 25MB limit (${formatFileSize(file.size)}). Please choose a smaller file.`);
+      setMessage(`File exceeds 10MB limit (${formatFileSize(file.size)}). Please choose a smaller file.`);
       return;
     }
 
@@ -214,7 +214,7 @@ function AdminUploadPage() {
             ) : (
               <>
                 <CloudUpload size={24} />
-                <span>Drop file here or click to browse (PDF, DOCX, DOC, JPG, PNG up to 25MB)</span>
+                <span>Drop file here or click to browse (PDF, DOCX, DOC, JPG, PNG up to 10MB)</span>
               </>
             )}
           </label>
@@ -246,4 +246,3 @@ function AdminUploadPage() {
 }
 
 export default AdminUploadPage;
-

@@ -17,7 +17,7 @@ const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'])
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB — matches Cloudinary plan limit
   fileFilter: (req, file, cb) => {
     const ext = (file.originalname.split('.').pop() || '').toLowerCase();
     if (ALLOWED_EXTENSIONS.has(ext)) {
@@ -179,7 +179,11 @@ router.post('/admin/document', upload.single('file'), async (req, res) => {
       async (error, result) => {
         if (error) {
           console.error('Cloudinary upload error:', error);
-          return res.status(500).json({ message: 'Cloudinary upload failed' });
+          const isTooLarge = error.http_code === 400 && /file size too large/i.test(error.message || '');
+          const message = isTooLarge
+            ? `File is too large (${(req.file.size / (1024 * 1024)).toFixed(2)}MB). Maximum allowed size is 10MB.`
+            : `Cloudinary upload failed: ${error.message || 'Unknown error'}`;
+          return res.status(isTooLarge ? 400 : 500).json({ message, reason: error.message });
         }
 
         const { departmentId, semesterId, subjectId } = req.body;
@@ -388,4 +392,3 @@ router.get('/admin/recent-documents', async (req, res) => {
 });
 
 module.exports = router;
-
